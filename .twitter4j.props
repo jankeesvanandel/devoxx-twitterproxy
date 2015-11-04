@@ -1,0 +1,4 @@
+export twitter4j_oauth_consumerKey=
+export twitter4j_oauth_consumerSecret=
+export twitter4j_oauth_accessToken=
+export twitter4j_oauth_accessTokenSecret=
