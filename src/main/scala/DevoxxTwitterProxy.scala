@@ -32,9 +32,27 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
 
   val twitter = Try(new TwitterFactory().getInstance())
 
-  def fetchTweetsForDevoxx(): Try[List[Tweet]] = {
+  var cache: (Long, List[Tweet]) = (0, Nil)
+  val cacheTime: Long = 10000 // 10 seconds cache time
+
+  def fetchWithCache(sinceId: Long): Try[List[Tweet]] = {
+    if (cache._1 + cacheTime <= System.currentTimeMillis()) {
+      val tweets = fetchTweetsForDevoxx(sinceId)
+      tweets.map{ tweetsList =>
+        cache = (System.currentTimeMillis(), tweetsList)
+      }
+
+      tweets
+    } else {
+      Success(cache._2)
+    }
+  }
+
+  def fetchTweetsForDevoxx(sinceId: Long): Try[List[Tweet]] = {
     twitter.map { t =>
       val query = new Query("#devoxx OR #devoxx15 OR #devoxx2015 OR @devoxx")
+      query.setCount(100)
+      query.setSinceId(sinceId)
       t.search(query).getTweets.asScala.toList
     }.map { tweets =>
       tweets.map { tweet =>
@@ -49,11 +67,11 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
 
   val routes = {
     logRequestResult("akka-http-microservice") {
-      pathPrefix("tweets" / "devoxx") {
+      pathPrefix("tweets" / "devoxx" / LongNumber) { sinceId =>
         get {
           respondWithHeader(`Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
             complete {
-              fetchTweetsForDevoxx() match {
+              fetchWithCache(sinceId) match {
                 case Success(tweets) => StatusCodes.OK -> tweets.toJson.compactPrint
                 case Failure(exception) => StatusCodes.BadRequest -> exception.getMessage
               }
