@@ -24,26 +24,32 @@ case class Tweet(id: Long, from: String, profileImageUrl: String, message: Strin
 case class ErrorMessage(message: String)
 
 trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
+
   implicit val system = ActorSystem()
   implicit val executor = system.dispatcher
   implicit val materializer = ActorMaterializer()
+
+  def config = ConfigFactory.load()
+  def logger = Logging(system, getClass)
 
   implicit val tweetFormat = jsonFormat4(Tweet.apply)
 
   val twitter = Try(new TwitterFactory().getInstance())
 
-  var cache: (Long, List[Tweet]) = (0, Nil)
-  val cacheTime: Long = 10000 // 10 seconds cache time
+  var cache: (Long, List[Tweet])
+  val cacheTime: Long
 
   def fetchWithCache(sinceId: Long): Try[List[Tweet]] = {
     if (cache._1 + cacheTime <= System.currentTimeMillis()) {
       val tweets = fetchTweetsForDevoxx(sinceId)
+      logger.debug("Retrieving tweets from Twitter")
       tweets.map{ tweetsList =>
+        logger.debug(s"Putting ${tweetsList.size} in cache")
         cache = (System.currentTimeMillis(), tweetsList)
+        tweetsList
       }
-
-      tweets
     } else {
+      logger.debug("Retrieving tweets from cache")
       Success(cache._2)
     }
   }
@@ -82,12 +88,12 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
     }
   }
 
-  def config = ConfigFactory.load()
-  def logger = Logging(system, getClass)
-
 }
 
 object DevoxxTwitterProxy extends DevoxxTwitterProxyService {
+
+  var cache: (Long, List[Tweet]) = (0, Nil)
+  val cacheTime: Long = 10000 // 10 seconds cache time
 
   Http().bindAndHandle(routes, config.getString("http.interface"), config.getInt("http.port"))
 }
