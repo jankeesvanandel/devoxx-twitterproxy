@@ -27,7 +27,7 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
 
   implicit val tweetFormat = jsonFormat4(Tweet.apply)
 
-  val twitter = Try(new TwitterFactory().getInstance())
+  private val twitter = Try(new TwitterFactory().getInstance())
 
   var cache: mutable.Map[String, (Long, List[Tweet])]
   val cacheTime: Long
