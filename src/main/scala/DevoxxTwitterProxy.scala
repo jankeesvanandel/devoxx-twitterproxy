@@ -13,7 +13,11 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try}
 
-case class Tweet(id: Long, from: String, profileImageUrl: String, message: String)
+case class Tweet(id: Long,
+                 from: String,
+                 profileImageUrl: String,
+                 message: String)
+
 case class ErrorMessage(message: String)
 
 trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
@@ -24,6 +28,7 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
   implicit val materializer = ActorMaterializer()
 
   def config = ConfigFactory.load()
+
   def logger = Logging(system, getClass)
 
   implicit val tweetFormat = jsonFormat4(Tweet.apply)
@@ -55,17 +60,17 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
     twitter.map { t =>
       val yearLong = DateTime(System.currentTimeMillis()).year
       val yearShort = yearLong - 2000
-      val query = new Query(s"#$event OR #$event$yearShort OR #$event$yearLong OR @$event")
+      val query = new Query(
+          s"#$event OR #$event$yearShort OR #$event$yearLong OR @$event")
       query.setCount(100)
       query.setSinceId(sinceId)
       t.search(query).getTweets.asScala.toList
     }.map { (tweets: List[Status]) =>
       tweets.map { tweet =>
-        Tweet(
-          tweet.getId,
-          tweet.getUser.getName,
-          tweet.getUser.getProfileImageURL,
-          tweet.getText)
+        Tweet(tweet.getId,
+              tweet.getUser.getName,
+              tweet.getUser.getProfileImageURL,
+              tweet.getText)
       }
     }
   }
@@ -75,11 +80,14 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
       pathPrefix("tweets" / ".*{1,20}".r) { event =>
         path(LongNumber) { sinceId =>
           get {
-            respondWithHeader(`Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
+            respondWithHeader(
+                `Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
               complete {
                 fetchWithCache(event, sinceId) match {
-                  case Success(tweets) => StatusCodes.OK -> tweets.toJson.compactPrint
-                  case Failure(exception) => StatusCodes.BadRequest -> exception.getMessage
+                  case Success(tweets) =>
+                    StatusCodes.OK -> tweets.toJson.compactPrint
+                  case Failure(exception) =>
+                    StatusCodes.BadRequest -> exception.getMessage
                 }
               }
             }
@@ -93,8 +101,11 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
 
 object DevoxxTwitterProxy extends DevoxxTwitterProxyService {
 
-  var cache: mutable.Map[String, (Long, List[Tweet])] = mutable.Map.empty.withDefaultValue((0L, Nil))
+  var cache: mutable.Map[String, (Long, List[Tweet])] =
+    mutable.Map.empty.withDefaultValue((0L, Nil))
   val cacheTime: Long = 10000 // 10 seconds cache time
 
-  Http().bindAndHandle(routes, config.getString("http.interface"), config.getInt("http.port"))
+  Http().bindAndHandle(routes,
+                       config.getString("http.interface"),
+                       config.getInt("http.port"))
 }
