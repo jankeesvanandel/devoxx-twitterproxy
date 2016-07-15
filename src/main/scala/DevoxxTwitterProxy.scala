@@ -34,6 +34,7 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
   var cache: mutable.Map[String, (Long, List[Tweet])]
   val cacheTime: Long
 
+  // Fetch tweets, from cache if possible.
   def fetchWithCache(event: String, sinceId: Long): Try[List[Tweet]] = {
     val eventCache = cache(event)
     if (eventCache._1 + cacheTime <= System.currentTimeMillis()) {
