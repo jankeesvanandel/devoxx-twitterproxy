@@ -18,6 +18,7 @@ case class ErrorMessage(message: String)
 
 trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
 
+  // Implicits
   implicit val system = ActorSystem()
   implicit val executor = system.dispatcher
   implicit val materializer = ActorMaterializer()
@@ -49,7 +50,7 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
     }
   }
 
-  def fetchTweets(event: String, sinceId: Long): Try[List[Tweet]] = {
+  private def fetchTweets(event: String, sinceId: Long): Try[List[Tweet]] = {
     twitter.map { t =>
       val yearLong = DateTime(System.currentTimeMillis()).year
       val yearShort = yearLong - 2000
