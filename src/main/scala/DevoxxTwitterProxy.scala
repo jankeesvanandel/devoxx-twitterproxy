@@ -61,16 +61,16 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
       val yearLong = DateTime(System.currentTimeMillis()).year
       val yearShort = yearLong - 2000
       val query = new Query(
-          s"#$event OR #$event$yearShort OR #$event$yearLong OR @$event")
+        s"#$event OR #$event$yearShort OR #$event$yearLong OR @$event")
       query.setCount(100)
       query.setSinceId(sinceId)
       t.search(query).getTweets.asScala.toList
     }.map { (tweets: List[Status]) =>
       tweets.map { tweet =>
         Tweet(tweet.getId,
-              tweet.getUser.getName,
-              tweet.getUser.getProfileImageURL,
-              tweet.getText)
+          tweet.getUser.getName,
+          tweet.getUser.getProfileImageURL,
+          tweet.getText)
       }
     }
   }
@@ -81,7 +81,7 @@ trait DevoxxTwitterProxyService extends App with DefaultJsonProtocol {
         path(LongNumber) { sinceId =>
           get {
             respondWithHeader(
-                `Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
+              `Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
               complete {
                 fetchWithCache(event, sinceId) match {
                   case Success(tweets) =>
@@ -106,6 +106,6 @@ object DevoxxTwitterProxy extends DevoxxTwitterProxyService {
   val cacheTime: Long = 10000 // 10 seconds cache time
 
   Http().bindAndHandle(routes,
-                       config.getString("http.interface"),
-                       config.getInt("http.port"))
+    config.getString("http.interface"),
+    config.getInt("http.port"))
 }
