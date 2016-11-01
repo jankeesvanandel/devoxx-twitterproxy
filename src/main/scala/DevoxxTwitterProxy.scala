@@ -1,5 +1,7 @@
+import java.util
+
 import akka.actor.ActorSystem
-import akka.event.{Logging, LoggingAdapter}
+import akka.event.Logging
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model._
@@ -7,13 +9,15 @@ import akka.http.scaladsl.model.headers.{HttpOriginRange, `Access-Control-Allow-
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.stream.{ActorMaterializer, Materializer}
-import com.typesafe.config.{Config, ConfigFactory}
+import com.ibm.watson.developer_cloud.alchemy.v1.AlchemyLanguage
+import com.ibm.watson.developer_cloud.alchemy.v1.model.DocumentSentiment
+import com.typesafe.config.ConfigFactory
 import spray.json.{DefaultJsonProtocol, JsonFormat}
 import twitter4j._
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContextExecutor, Future}
 
 sealed trait ViewModels extends DefaultJsonProtocol {
 
@@ -23,12 +27,13 @@ sealed trait ViewModels extends DefaultJsonProtocol {
     from: String,
     profileImageUrl: String,
     message: String,
-    imageUrl: Option[String]
+    imageUrl: Option[String],
+    sentiment: Option[String]
   )
 
   case class ErrorMessage(message: String)
 
-  implicit val jfTweet: JsonFormat[Tweet] = jsonFormat6(Tweet.apply)
+  implicit val jfTweet: JsonFormat[Tweet] = jsonFormat7(Tweet.apply)
 
 }
 
@@ -47,22 +52,26 @@ trait DevoxxTwitterProxyService extends ViewModels {
   var cache: mutable.Map[String, (Long, List[Tweet])]
   val cacheTime: Long
 
+  var service: AlchemyLanguage = new AlchemyLanguage()
+  service.setApiKey(sys.props.getOrElse("alchemyApiKey", sys.error("Missing property alchemyApiKey")))
+
+
   // Fetch tweets, from cache if possible.
-  private def fetchWithCache(event: String, sinceId: Long): List[Tweet] = {
+  private def fetchWithCache(event: String, sinceId: Long): Future[List[Tweet]] = {
     val eventCache = cache(event)
     if (shouldLoadNewTweets(sinceId, eventCache)) {
       logger.debug("Retrieving tweets from Twitter")
       val tweets = fetchTweets(event, sinceId)
 
-      val newTweetsCache = mergeNewTweetsWithCache(eventCache, tweets, sinceId)
+      mergeNewTweetsWithCache(eventCache, tweets, sinceId).map { tweets =>
+        logger.debug(s"Putting ${tweets.size} in cache")
+        cache.put(event, (System.currentTimeMillis(), tweets))
 
-      logger.debug(s"Putting ${tweets.size} in cache")
-      cache.put(event, (System.currentTimeMillis(), newTweetsCache))
-
-      newTweetsCache
+        tweets
+      }
     } else {
       logger.debug("Retrieving tweets from cache")
-      eventCache._2
+      Future.successful(eventCache._2)
     }
   }
 
@@ -73,8 +82,7 @@ trait DevoxxTwitterProxyService extends ViewModels {
       cachedTime + cacheTime <= System.currentTimeMillis()
   }
 
-  private def mergeNewTweetsWithCache(eventCache: (Long, List[Tweet]), newTweets: List[Tweet], sinceId: Long): List[Tweet] = {
-    val cachedTweetsId = eventCache._1
+  private def mergeNewTweetsWithCache(eventCache: (Long, List[Tweet]), newTweets: List[Tweet], sinceId: Long): Future[List[Tweet]] = {
     val cachedTweets = eventCache._2
     val oneHourBack = System.currentTimeMillis() - 1000 * 60 * 60
 
@@ -93,8 +101,30 @@ trait DevoxxTwitterProxyService extends ViewModels {
       .dropWhile(_.timestamp < lastTimestampInCache)
 
     val indexOfLastTweetInCache = newTweetsCleanedUp.indexWhere(_.id == lastIdInCache)
-    val newTweetsCache = cleanedUpCache ++ newTweetsCleanedUp.drop(indexOfLastTweetInCache + 1)
-    newTweetsCache
+    val newTweetsWithoutExisting = newTweetsCleanedUp.drop(indexOfLastTweetInCache + 1)
+
+    val newTweetsWithSentimentFt: List[Future[Tweet]] = newTweetsWithoutExisting.map(addSentiment)
+    val traversed = Future.sequence(newTweetsWithSentimentFt)
+    traversed.map { newTweetsWithSentiment =>
+      cleanedUpCache ++ newTweetsWithSentiment
+    }
+  }
+
+  private def addSentiment(tweet: Tweet): Future[Tweet] = {
+    val params: util.Map[String, String] = Map(AlchemyLanguage.TEXT -> tweet.message).asJava
+
+    // get sentiment
+    val watsonFt: Future[DocumentSentiment] = Future {
+      service.getSentiment(params.asInstanceOf[util.Map[String, AnyRef]]).execute()
+    }
+
+    for {
+      sentiment <- watsonFt
+    } yield {
+      System.out.println("Sentiment: " + sentiment)
+
+      tweet.copy(sentiment = Some(sentiment.getSentiment.getType.toString))
+    }
   }
 
   private def fetchTweets(event: String, sinceId: Long): List[Tweet] = {
@@ -113,7 +143,8 @@ trait DevoxxTwitterProxyService extends ViewModels {
         tweet.getUser.getName,
         tweet.getUser.getProfileImageURL,
         tweet.getText,
-        imageUrl
+        imageUrl,
+        None
       )
     }.sortBy(_.timestamp)
   }
