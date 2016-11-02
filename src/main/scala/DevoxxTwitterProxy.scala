@@ -64,7 +64,9 @@ trait CacheHandler {
 
 class DynamodbCacheHandler(logger: LoggingAdapter) extends CacheHandler with ViewModels {
 
-  val credentials: BasicAWSCredentials = new BasicAWSCredentials("AKIAJYK3CWWXDDD327SA","Kcp5pvYLxyYFtiYp/OfJODrROll9gc9KDUhFKcNI")
+  private val awsAccessKeyId = sys.props.get("awsAccessKeyId")
+  private val awsSecretAccessKey = sys.props.get("awsSecretAccessKey").get
+  val credentials: BasicAWSCredentials = new BasicAWSCredentials(awsAccessKeyId.get, awsSecretAccessKey)
   private val client: AmazonDynamoDBClient = new AmazonDynamoDBClient(credentials)
     .withRegion(Regions.EU_WEST_1)
 
