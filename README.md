@@ -6,3 +6,12 @@ Used technologies:
 * Akka & Akka-Http
 * Sbt
 * Twitter4j
+
+IBM Watson for sentiment analysis
+
+AWS
+* EC2
+* Java SDK
+* DynamoDB
+* IAM
+

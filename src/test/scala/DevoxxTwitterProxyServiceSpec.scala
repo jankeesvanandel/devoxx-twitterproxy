@@ -30,5 +30,5 @@ class DevoxxTwitterProxyServiceSpec extends FlatSpec with Matchers with Scalates
       Tweet(1L, "from me", "url", "Hello world!")
     ))
   )
-  override val cacheTime: Long = 0
+  override val cacheTimeMs: Long = 0
 }
