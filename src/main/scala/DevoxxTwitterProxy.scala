@@ -12,8 +12,8 @@ import akka.stream.{ActorMaterializer, Materializer}
 import com.amazonaws.auth.BasicAWSCredentials
 import com.amazonaws.regions.Regions
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
-import com.amazonaws.services.dynamodbv2.document.spec.ScanSpec
 import com.amazonaws.services.dynamodbv2.document._
+import com.amazonaws.services.dynamodbv2.model.{AttributeValue, ScanRequest}
 import com.ibm.watson.developer_cloud.alchemy.v1.AlchemyLanguage
 import com.typesafe.config.{Config, ConfigFactory}
 import spray.json.{DefaultJsonProtocol, JsonFormat}
@@ -21,7 +21,6 @@ import twitter4j._
 import spray.json._
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -60,6 +59,20 @@ case class Event(name: String, country: String, year: String) {
 trait CacheHandler {
   def updateCache(newTweet: Tweet): Unit
   def getFrom(sinceId: Long): List[Tweet]
+
+  private var lastCacheClean: Long = System.currentTimeMillis() // Every 1 minute a cache cleanup
+  private val cacheCleanIntervalMs: Long = 1000 * 60 // Every 1 minute a cache cleanup
+  private val cacheTtlMs: Long = 1000 * 60 * 60 // 1 hour cache time
+
+  def doCleanCache(now: Long, cacheTtlMs: Long): Unit
+
+  def cleanCachePeriodically(): Unit = {
+    val now = System.currentTimeMillis()
+    if (lastCacheClean + cacheCleanIntervalMs < now) {
+      doCleanCache(now, cacheTtlMs)
+      lastCacheClean = now
+    }
+  }
 }
 
 class DynamodbCacheHandler(logger: LoggingAdapter) extends CacheHandler with ViewModels {
@@ -76,52 +89,55 @@ class DynamodbCacheHandler(logger: LoggingAdapter) extends CacheHandler with Vie
   def updateCache(newTweet: Tweet): Unit = {
     try {
       val json = newTweet.toJson.compactPrint
-      logger.info(s"Saving: $json")
       val item = new Item()
         .withPrimaryKey("timestamp", newTweet.timestamp)
         .withPrimaryKey("id", newTweet.id)
         .withString("tweet", json)
       val putItemOutcome = table.putItem(item)
-      logger.info(s"putItemOutcome: $putItemOutcome")
-      val putItemResult = putItemOutcome.getPutItemResult
-      logger.info(s"putItemResult: $putItemResult")
+      putItemOutcome.getPutItemResult
     } catch {
       case e: Exception => logger.error(s"e: $e")
     }
   }
 
   def getFrom(since: Long): List[Tweet] = {
-    val spec: ScanSpec = new ScanSpec()
+    val scanRequest: ScanRequest = new ScanRequest()
+      .withTableName("devoxx-twitterproxy")
+      .withFilterExpression("#ts >= :ts")
+      .withExpressionAttributeNames(Map("#ts" -> "timestamp").asJava)
+      .withExpressionAttributeValues(Map(":ts" -> new AttributeValue().withN(since.toString)).asJava)
 
-    val items: ItemCollection[ScanOutcome] = table.scan(spec)
-
-    println("All tweets")
-
-    val iterator: util.Iterator[Item] = items.iterator()
-    val buffer: ListBuffer[Tweet] = ListBuffer.empty
-    while (iterator.hasNext) {
-      val next = iterator.next()
-      val tweetString = next.getString("tweet")
+    val items = client.scan(scanRequest).getItems.asScala.toList
+    items.map { item =>
+      val tweetString = item.get("tweet").getS
       val jsValue = tweetString.parseJson
-      val tweet = jsValue.convertTo[Tweet]
-      println(s"Tweet: $tweet")
-      buffer.append(tweet)
-    }
+      jsValue.convertTo[Tweet]
+    }.filter(_.timestamp >= since)
+      .sortBy(t => (t.timestamp, t.id))
+  }
 
-    buffer.toList
+  override def doCleanCache(now: Long, cacheTtlMs: Long): Unit = {
+//    DeleteItemOutcome outcome = table.deleteItem("Id", 101);
+
+//    cache = cache.filter(_.timestamp > now + cacheTtlMs)
   }
 }
 
 object SingletonCacheHandler extends CacheHandler {
   private var cache: List[Tweet] = Nil
-  private val cacheTimeMs: Long = 10000 // 10 seconds cache time
 
   def updateCache(newTweet: Tweet): Unit = {
     cache = cache :+ newTweet
+
+    cleanCachePeriodically()
   }
 
   def getFrom(since: Long): List[Tweet] = {
-    cache.dropWhile(_.timestamp < since)
+    cache.filter(_.timestamp >= since)
+  }
+
+  override def doCleanCache(now: Long, cacheTtlMs: Long): Unit = {
+    cache = cache.filter(_.timestamp > now + cacheTtlMs)
   }
 }
 
@@ -222,13 +238,11 @@ trait DevoxxTwitterProxyService extends ViewModels {
 
   val routes: Route = {
     logRequestResult("devoxx-twitterproxy") {
-      pathPrefix("tweets" / ".*{1,20}".r) { event =>
-        path(LongNumber) { sinceId =>
-          get {
-            respondWithHeader(`Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
-              complete {
-                StatusCodes.OK -> cacheHandler.getFrom(sinceId)
-              }
+      pathPrefix("tweets" / LongNumber) { sinceId =>
+        get {
+          respondWithHeader(`Access-Control-Allow-Origin`.forRange(HttpOriginRange.*)) {
+            complete {
+              StatusCodes.OK -> cacheHandler.getFrom(sinceId)
             }
           }
         }
