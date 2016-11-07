@@ -143,8 +143,24 @@ object SingletonCacheHandler extends CacheHandler {
 
 class SentimentHandler(cacheHandler: CacheHandler, logger: LoggingAdapter)(implicit executionContext: ExecutionContext) {
 
-  private val service: AlchemyLanguage = new AlchemyLanguage()
-  service.setApiKey(sys.props.getOrElse("alchemyApiKey", sys.error("Missing property alchemyApiKey")))
+  private val alchemyApiKeys = sys.props.getOrElse("alchemyApiKeys", sys.error("Missing property alchemyApiKeys"))
+  private val services: List[AlchemyLanguage] = alchemyApiKeys.split(',').toList.map { key =>
+    val service = new AlchemyLanguage()
+    service.setApiKey(key)
+    service
+  }
+  private var currentService: Int = 0
+
+  private def takeService(): AlchemyLanguage = {
+    val newValue = currentService + 1
+    if (newValue >= services.length) {
+      currentService = 0
+    } else {
+      currentService = newValue
+    }
+
+    services(currentService)
+  }
 
   def addSentiment(newTweet: Tweet): Unit = {
     val params: util.Map[String, AnyRef] = Map(
@@ -152,7 +168,7 @@ class SentimentHandler(cacheHandler: CacheHandler, logger: LoggingAdapter)(impli
     ).asJava.asInstanceOf[util.Map[String, AnyRef]]
 
     for {
-      sentimentTry <- Future(Try(service.getSentiment(params).execute()))
+      sentimentTry <- Future(Try(takeService().getSentiment(params).execute()))
     } yield {
       val tweetWithSentiment = sentimentTry match {
         case Success(sentiment) =>
@@ -257,6 +273,7 @@ object DevoxxTwitterProxy extends App with DevoxxTwitterProxyService {
   override implicit val executor: ExecutionContextExecutor = system.dispatcher
   override implicit val materializer: Materializer = ActorMaterializer()
 
+//  override val cacheHandler: CacheHandler = SingletonCacheHandler
   override val cacheHandler: CacheHandler = new DynamodbCacheHandler(logger)
   override val sentimentHandler: SentimentHandler = new SentimentHandler(cacheHandler, logger)
   override val twitterStreamer: TwitterStreamer = new TwitterStreamer(sentimentHandler, logger)

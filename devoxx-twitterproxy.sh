@@ -21,7 +21,7 @@ start() {
   fi
   echo 'Starting service...' >&2
   source ~/.twitter4j.props
-  OPTS="-Dtwitter4j.oauth.consumerKey=$twitter4j_oauth_consumerKey -Dtwitter4j.oauth.consumerSecret=$twitter4j_oauth_consumerSecret -Dtwitter4j.oauth.accessToken=$twitter4j_oauth_accessToken -Dtwitter4j.oauth.accessTokenSecret=$twitter4j_oauth_accessTokenSecret"
+  OPTS="-DawsAccessKeyId=$AWS_ACCESS_KEY_ID -DawsSecretAccessKey=$AWS_SECRET_ACCESS_KEY -DalchemyApiKeys=$alchemyApiKeys -Dtwitter4j.oauth.consumerKey=$twitter4j_oauth_consumerKey -Dtwitter4j.oauth.consumerSecret=$twitter4j_oauth_consumerSecret -Dtwitter4j.oauth.accessToken=$twitter4j_oauth_accessToken -Dtwitter4j.oauth.accessTokenSecret=$twitter4j_oauth_accessTokenSecret"
   local CMD="$SCRIPT $OPTS &> \"$LOGFILE\" & echo \$!"
   su -c "$CMD" $RUNAS > "$PIDFILE"
   echo 'Service started' >&2
