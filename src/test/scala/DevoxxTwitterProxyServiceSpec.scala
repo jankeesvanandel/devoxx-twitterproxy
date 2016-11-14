@@ -14,7 +14,7 @@ class DevoxxTwitterProxyServiceSpec extends FlatSpec with Matchers with Scalates
   override def config = testConfig
   override val logger = NoLogging
 
-  val tweet = Tweet(12345L, "1234567890", "http://url/", "Hello world")
+  val tweet = Tweet(12345L, 12345L, "1234567890", "http://url/", "Hello world", None, None)
   val tweets = List(tweet)
 
   it should "respond to a GET request" in {
@@ -24,11 +24,7 @@ class DevoxxTwitterProxyServiceSpec extends FlatSpec with Matchers with Scalates
 //      responseAs[List[Tweet]] shouldBe tweets
     }
   }
-
-  override var cache: mutable.Map[String, (Long, List[Tweet])] = mutable.Map(
-    "devoxx" -> (1L -> List(
-      Tweet(1L, "from me", "url", "Hello world!")
-    ))
-  )
-  override val cacheTimeMs: Long = 0
+  override val cacheHandler: CacheHandler = SingletonCacheHandler
+  override val sentimentHandler: SentimentHandler = new SentimentHandler(cacheHandler, logger)
+  override val twitterStreamer: TwitterStreamer = new TwitterStreamer(sentimentHandler, logger)
 }
