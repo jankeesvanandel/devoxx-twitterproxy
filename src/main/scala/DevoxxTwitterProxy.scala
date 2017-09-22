@@ -186,7 +186,7 @@ class SentimentHandler(cacheHandler: CacheHandler, logger: LoggingAdapter)(impli
 
 class TwitterStreamer(sentimentHandler: SentimentHandler, logger: LoggingAdapter) {
 
-  private val events = Array(Event("devoxx", "be", "16"))
+  private val events = Array(Event("devoxx", "be", "17"))
 
   private val twitterFilters: Array[String] = events.flatMap(_.allPermutations)
 
