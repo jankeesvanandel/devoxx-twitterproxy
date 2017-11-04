@@ -104,6 +104,7 @@ class DynamodbCacheHandler(logger: LoggingAdapter) extends CacheHandler with Vie
     val scanRequest: ScanRequest = new ScanRequest()
       .withTableName("devoxx-twitterproxy")
       .withFilterExpression("#ts >= :ts")
+      .withLimit(100)
       .withExpressionAttributeNames(Map("#ts" -> "timestamp").asJava)
       .withExpressionAttributeValues(Map(":ts" -> new AttributeValue().withN(since.toString)).asJava)
 
