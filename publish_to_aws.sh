@@ -4,7 +4,7 @@ echo "Building distribution"
 sbt dist
 echo "Publishing to AWS"
 
-AWS_HOST=54.246.219.134
+AWS_HOST=ec2-34-244-221-30.eu-west-1.compute.amazonaws.com
 AWS_USER=ec2-user
 AWS_KEY=~/.ssh/DevoxxWallKeyPair2015.pem
 
