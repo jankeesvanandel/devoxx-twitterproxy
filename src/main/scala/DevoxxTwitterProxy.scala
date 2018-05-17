@@ -1,5 +1,3 @@
-import java.util
-
 import akka.actor.ActorSystem
 import akka.event.{Logging, LoggingAdapter}
 import akka.http.scaladsl.Http
@@ -9,12 +7,12 @@ import akka.http.scaladsl.model.headers.{HttpOriginRange, `Access-Control-Allow-
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.stream.{ActorMaterializer, Materializer}
-import com.amazonaws.auth.BasicAWSCredentials
+import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
 import com.amazonaws.regions.Regions
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
+import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBClientBuilder}
 import com.amazonaws.services.dynamodbv2.document._
 import com.amazonaws.services.dynamodbv2.model.{AttributeValue, ScanRequest}
-import com.ibm.watson.developer_cloud.alchemy.v1.AlchemyLanguage
+import com.ibm.watson.developer_cloud.natural_language_understanding.v1.model.AnalysisResults
 import com.typesafe.config.{Config, ConfigFactory}
 import spray.json.{DefaultJsonProtocol, JsonFormat}
 import twitter4j._
@@ -79,9 +77,11 @@ class DynamodbCacheHandler(logger: LoggingAdapter) extends CacheHandler with Vie
 
   private val awsAccessKeyId = sys.props.get("awsAccessKeyId")
   private val awsSecretAccessKey = sys.props.get("awsSecretAccessKey").get
-  val credentials: BasicAWSCredentials = new BasicAWSCredentials(awsAccessKeyId.get, awsSecretAccessKey)
-  private val client: AmazonDynamoDBClient = new AmazonDynamoDBClient(credentials)
+  private val credentials: BasicAWSCredentials = new BasicAWSCredentials(awsAccessKeyId.get, awsSecretAccessKey)
+  private val client: AmazonDynamoDB = AmazonDynamoDBClientBuilder.standard()
     .withRegion(Regions.EU_WEST_1)
+    .withCredentials(new AWSStaticCredentialsProvider(credentials))
+    .build()
 
   private val dynamoDB: DynamoDB = new DynamoDB(client)
   private val table: Table = dynamoDB.getTable("devoxx-twitterproxy")
@@ -144,36 +144,32 @@ object SingletonCacheHandler extends CacheHandler {
 
 class SentimentHandler(cacheHandler: CacheHandler, logger: LoggingAdapter)(implicit executionContext: ExecutionContext) {
 
-  private val alchemyApiKeys = sys.props.getOrElse("alchemyApiKeys", sys.error("Missing property alchemyApiKeys"))
-  private val services: List[AlchemyLanguage] = alchemyApiKeys.split(',').toList.map { key =>
-    val service = new AlchemyLanguage()
-    service.setApiKey(key)
-    service
-  }
-  private var currentService: Int = 0
+  import com.ibm.watson.developer_cloud.natural_language_understanding.v1.NaturalLanguageUnderstanding
 
-  private def takeService(): AlchemyLanguage = {
-    val newValue = currentService + 1
-    if (newValue >= services.length) {
-      currentService = 0
-    } else {
-      currentService = newValue
-    }
+  private val service = new NaturalLanguageUnderstanding("2018-03-16", sys.props.get("nluUsername").get, sys.props.get("nluPassword").get)
 
-    services(currentService)
+  private def getSentiment(tweet: Tweet): Try[AnalysisResults] = {
+    import com.ibm.watson.developer_cloud.natural_language_understanding.v1.model.AnalyzeOptions
+    import com.ibm.watson.developer_cloud.natural_language_understanding.v1.model.Features
+    import com.ibm.watson.developer_cloud.natural_language_understanding.v1.model.EntitiesOptions
+    val entitiesOptions = new EntitiesOptions.Builder().emotion(true).sentiment(true).limit(2).build
+    val features = new Features.Builder().entities(entitiesOptions).build
+    val options = new AnalyzeOptions.Builder().text(tweet.message).features(features).build
+    Try(service.analyze(options).execute())
   }
 
   def addSentiment(newTweet: Tweet): Unit = {
-    val params: util.Map[String, AnyRef] = Map(
-      AlchemyLanguage.TEXT -> newTweet.message
-    ).asJava.asInstanceOf[util.Map[String, AnyRef]]
-
     for {
-      sentimentTry <- Future(Try(takeService().getSentiment(params).execute()))
+      sentimentTry <- Future(getSentiment(newTweet))
     } yield {
       val tweetWithSentiment = sentimentTry match {
         case Success(sentiment) =>
-          newTweet.copy(sentiment = Some(sentiment.getSentiment.getType.toString))
+          val avgSentiment = sentiment.getEntities.asScala.map(_.getSentiment.getScore.doubleValue()).sum
+          newTweet.copy(sentiment = Some(avgSentiment match {
+            case s if s < 0.5 => "NEGATIVE"
+            case s if s < 0.7 => "NEUTRAL"
+            case _ => "POSITIVE"
+          }))
         case Failure(e) =>
           logger.warning(s"Cannot determine sentiment, because of: $e")
           newTweet
@@ -187,7 +183,7 @@ class SentimentHandler(cacheHandler: CacheHandler, logger: LoggingAdapter)(impli
 
 class TwitterStreamer(sentimentHandler: SentimentHandler, logger: LoggingAdapter) {
 
-  private val events = Array(Event("devoxx", "be", "17"))
+  private val events = Array(Event("devoxx", "pl", "18"))
 
   private val twitterFilters: Array[String] = events.flatMap(_.allPermutations)
 
@@ -274,7 +270,6 @@ object DevoxxTwitterProxy extends App with DevoxxTwitterProxyService {
   override implicit val executor: ExecutionContextExecutor = system.dispatcher
   override implicit val materializer: Materializer = ActorMaterializer()
 
-//  override val cacheHandler: CacheHandler = SingletonCacheHandler
   override val cacheHandler: CacheHandler = new DynamodbCacheHandler(logger)
   override val sentimentHandler: SentimentHandler = new SentimentHandler(cacheHandler, logger)
   override val twitterStreamer: TwitterStreamer = new TwitterStreamer(sentimentHandler, logger)
@@ -282,4 +277,13 @@ object DevoxxTwitterProxy extends App with DevoxxTwitterProxyService {
   Http().bindAndHandle(routes,
     config.getString("http.interface"),
     config.getInt("http.port"))
+
+//  sentimentHandler.addSentiment(Tweet(
+//    1L,
+//    1L,
+//    "",
+//    "",
+//    "Devoxx is zo cool",
+//    None, None
+//  ))
 }

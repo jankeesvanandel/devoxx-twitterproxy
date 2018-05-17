@@ -3,7 +3,7 @@ enablePlugins(JavaAppPackaging)
 name := "devoxx-twitterproxy"
 organization := "com.devoxx"
 version := "1.0"
-scalaVersion := "2.11.8"
+scalaVersion := "2.11.12"
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
 
@@ -23,9 +23,9 @@ libraryDependencies ++= {
     "org.twitter4j" % "twitter4j-core" % twitter4jStream,
     "org.twitter4j" % "twitter4j-stream" % twitter4jStream,
 
-    "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.49",
+    "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.11.328",
 
-    "com.ibm.watson.developer_cloud" % "java-sdk" % "3.5.0"
+    "com.ibm.watson.developer_cloud" % "java-sdk" % "5.1.1"
   )
 }
 
